@@ -1,4 +1,4 @@
-package com.congxiaoyao
+package com.congxiaoyao.autoclick
 
 import java.awt.Font
 import javax.swing.JComponent
