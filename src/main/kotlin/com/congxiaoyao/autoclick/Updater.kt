@@ -1,25 +1,21 @@
 package com.congxiaoyao.autoclick
 
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.awt.Color
-import java.io.*
+import java.io.File
+import java.io.IOException
 import java.net.URL
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
-import java.util.zip.ZipInputStream
-import javax.net.ssl.HostnameVerifier
 import javax.swing.JLabel
 import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 class Updater(private val versionLabel: JLabel) {
 
-    private val uiThread = UIThread()
-    private val client = OkHttpClient().newBuilder()
-        .hostnameVerifier(HostnameVerifier { hostname, session -> true })
-        .build()
+    @Volatile
+    internal var updatePrepared = false
 
+    private val uiThread = UIThread()
     private val versionText = "v$versionName"
     private val checkUpdateText = Array(4) { "$versionText${buildString { repeat(it) { append('.') } }}" }
     private fun downloadingText(progress: Double) = "$versionText(正在下载新版本 ${(progress * 100).toInt()}%)"
@@ -52,8 +48,8 @@ class Updater(private val versionLabel: JLabel) {
                 Thread.sleep(500)
             }
         })
-        val newestCode = fetchNewestVersion()
 
+        val newestCode = fetchNewestVersion()
         uiThread.cancelRunningTask()
 
         if (newestCode <= versionCode) {
@@ -64,19 +60,23 @@ class Updater(private val versionLabel: JLabel) {
 
         //1.下载最新jar包
         downloadApp()
+        updatePrepared = true
         //2.解压安装器
         unZipInstaller()
-        //3.调起安装器，关闭自己
+        if (!remainLabel.isCounting) {
+            //3.调起安装器
+            runInstaller()
+            //4.关闭自己，等待被调起
+            exitProcess(0)
+        }
+    }
+
+    private fun runInstaller() {
         val targetDirPath = getAppFileParentPath()
         val sourcePath = Cons.newestAppFile.absolutePath
         val arg = "$targetDirPath;;;;;$sourcePath"
-        val installerPath = Cons.installerFile.absolutePath
-        runJar(installerPath, arg)
-        exitProcess(0)
-    }
 
-    private fun runJar(filePath: String, arg: String) {
-        val jarFile = File(filePath)
+        val jarFile = File(Cons.installerFile.absolutePath)
         val cmd = "java -jar ${jarFile.name} $arg"
         try {
             Runtime.getRuntime().exec(cmd, null, jarFile.parentFile)
@@ -115,11 +115,6 @@ class Updater(private val versionLabel: JLabel) {
     }
 
     private fun downloadApp() {
-        val response = client.newCall(Request.Builder().apply {
-            get()
-            url("https://github.com/congxiaoyao/MyJavaUtils/archive/master.zip")
-        }.build()).execute()
-
         uiThread.post(Runnable {
             var index = 0
             while (true) {
@@ -128,32 +123,26 @@ class Updater(private val versionLabel: JLabel) {
                 Thread.sleep(500)
             }
         })
-
-        val reader = ZipInputStream(ByteArrayInputStream(response.body?.bytes()))
-        while (true) {
-            val entry = reader.nextEntry ?: break
-            if (entry.name == "MyJavaUtils-master/AutoClick.jar") {
-                reader.copyTo(Cons.newestAppFile.outputStream())
+        URL(Cons.URL_DOWNLOAD_APP).openConnection().apply {
+            connect()
+            getInputStream().use {
+                it.copyTo(Cons.newestAppFile.outputStream())
             }
         }
-
         uiThread.cancelRunningTask()
     }
 
     private fun fetchNewestVersion(): Int {
-        val response = client.newCall(Request.Builder().apply {
-            get()
-            url("https://github.com/congxiaoyao/SoftwareUpdateCheck/archive/main.zip")
-        }.build()).execute()
-
-        val reader = ZipInputStream(response.body?.byteStream())
-        while (true) {
-            val entry = reader.nextEntry ?: break
-            if (entry.name == "SoftwareUpdateCheck-main/newest_version") {
-                return reader.bufferedReader().readText().trim().toIntOrNull() ?: -1
+        return try {
+            URL(Cons.URL_CHECK_NEW).openConnection().run {
+                connect()
+                getInputStream().use {
+                    it.reader().readText().trim().toInt()
+                }
             }
+        } catch (e: Exception) {
+            -1
         }
-        return -1
     }
 
     private fun destroy() {
