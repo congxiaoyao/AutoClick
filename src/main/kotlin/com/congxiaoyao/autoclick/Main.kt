@@ -1,16 +1,19 @@
 package com.congxiaoyao.autoclick
 
+import com.congxiaoyao.autoclick.lan.CmdReceiver
+import com.congxiaoyao.autoclick.lan.CmdSender
 import java.awt.*
-import java.awt.event.InputEvent
+import java.awt.event.*
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.swing.*
 import kotlin.concurrent.thread
 
+
 var sw = Toolkit.getDefaultToolkit().screenSize.width
 var sh = Toolkit.getDefaultToolkit().screenSize.height
 
-private val window = JFrame("定时点击")
+internal val window = JFrame("定时点击")
 private val timeLabel = JLabel()
 private val editTexts = arrayOfNulls<JTextArea>(4)
 internal val remainLabel = RemainLabel()
@@ -22,8 +25,16 @@ private val format = SimpleDateFormat("HH:mm:ss:SSS")
 
 fun main() {
     initUI()
+    initMenu()
     setUpClockWorker()
+    initLan()
     updater.checkUpdate()
+}
+
+fun initLan() {
+    thread {
+        CmdReceiver().start()
+    }
 }
 
 fun setUpClockWorker() {
@@ -48,7 +59,50 @@ private fun initUI() {
     window.setBounds((sw - w) / 2, (sh - h) / 2, w, h)
     window.layout = BorderLayout()
 
+    addComponentsToWindow()
 
+    window.addWindowListener(object : WindowAdapter() {
+        override fun windowClosing(event: WindowEvent) = windowClosed(event)
+        override fun windowClosed(event: WindowEvent) {
+            saveUserData()
+        }
+    })
+    window.defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
+    window.isVisible = true
+}
+
+fun initMenu() {
+    window.jMenuBar = JMenuBar().apply {
+        add(JMenu("菜单").apply {
+            add(JMenuItem("全部关机").apply {
+                addActionListener {
+                    CmdSender.sendCommand("shutdown")
+                }
+            })
+        })
+    }
+}
+
+internal fun saveUserData() {
+    Cons.userDefaultTimeFile.writer().buffered().use { writer ->
+        editTexts.requireNoNulls().map { it.text }.forEach {
+            writer.write(it)
+            writer.newLine()
+            writer.flush()
+        }
+    }
+}
+
+private fun loadUserData(): List<String> {
+    return try {
+        Cons.userDefaultTimeFile.readLines().take(4)
+    } catch (e: Throwable) {
+        e.printStackTrace()
+        listOf("8", "45", "1", "0")
+    }
+}
+
+private fun addComponentsToWindow() {
     window.add(JPanel().apply {
         timeLabel.fontSize = 16
         layout = FlowLayout(FlowLayout.CENTER)
@@ -64,7 +118,7 @@ private fun initUI() {
             fontSize = 40
             this.foreground = Color.RED
         })
-        val text = arrayOf("时","分","秒","毫秒")
+        val text = arrayOf("时", "分", "秒", "毫秒")
         repeat(4) {
             add(JTextArea().apply {
                 if (it == 3) {
@@ -81,7 +135,7 @@ private fun initUI() {
         }
     }, BorderLayout.CENTER)
 
-    val timeStr = arrayOf("8", "45", "1", "0")
+    val timeStr = loadUserData()
     repeat(editTexts.size) {
         editTexts[it]!!.text = timeStr[it]
     }
@@ -110,7 +164,7 @@ private fun initUI() {
                     )
                 }
             }
-        },BorderLayout.EAST)
+        }, BorderLayout.EAST)
         add(JPanel().apply {
             layout = FlowLayout(FlowLayout.LEFT)
             add(JLabel().apply { preferredSize = Dimension(0, 1) })
@@ -118,9 +172,19 @@ private fun initUI() {
         }, BorderLayout.WEST)
     }, BorderLayout.SOUTH)
 
-
-    window.defaultCloseOperation = WindowConstants.EXIT_ON_CLOSE
-    window.isVisible = true
+    versionLabel.addMouseListener(object : MouseAdapter() {
+        var lastClickTime = -1L
+        override fun mouseClicked(p0: MouseEvent?) {
+            if (lastClickTime > 0) {
+                val delta = System.currentTimeMillis() - lastClickTime
+                if (delta < 350) {
+                    lastClickTime = -1
+                    updater.reInstallFromServer()
+                }
+            }
+            lastClickTime = System.currentTimeMillis()
+        }
+    })
 }
 
 fun checkUserInput() {

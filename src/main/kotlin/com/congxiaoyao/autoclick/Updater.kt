@@ -54,10 +54,12 @@ class Updater(private val versionLabel: JLabel) {
 
         if (newestCode <= versionCode) {
             versionLabel.text = "$versionText($versionCode)"
-            destroy()
             return
         }
+        reInstallFromServer()
+    }
 
+    fun reInstallFromServer() {
         //1.下载最新jar包
         downloadApp()
         updatePrepared = true
@@ -67,6 +69,7 @@ class Updater(private val versionLabel: JLabel) {
             //3.调起安装器
             runInstaller()
             //4.关闭自己，等待被调起
+            saveUserData()
             exitProcess(0)
         }
     }
@@ -77,7 +80,7 @@ class Updater(private val versionLabel: JLabel) {
         val arg = "$targetDirPath;;;;;$sourcePath"
 
         val jarFile = File(Cons.installerFile.absolutePath)
-        val cmd = "java -jar ${jarFile.name} $arg"
+        val cmd = "javaw -jar ${jarFile.name} $arg"
         try {
             Runtime.getRuntime().exec(cmd, null, jarFile.parentFile)
         } catch (e: IOException) {
@@ -143,10 +146,6 @@ class Updater(private val versionLabel: JLabel) {
         } catch (e: Exception) {
             -1
         }
-    }
-
-    private fun destroy() {
-        uiThread.shutDown()
     }
 
     private class UIThread {
